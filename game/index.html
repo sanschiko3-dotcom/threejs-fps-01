@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blackwater Dock — a three.js tactical FPS</title>
+<style>
+  /* Night terminal: deep blue-black canvas, cold concrete surfaces, one
+     sodium-orange accent. Six colours, nothing else, on the page or in 3D. */
+  :root {
+    --canvas: #0a0e16;
+    --surface: #141a24;
+    --hairline: #2a3442;
+    --ink: #e8e6df;
+    --muted: #8b98a8;
+    --accent: #ff9a2e;
+    --danger: #ff4a3a;
+    --jackal: #ff9a2e;
+    --sentinel: #5ea8e8;
+    --radius: 4px;
+    --font-ui: system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --font-readout: ui-monospace, 'SF Mono', Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    overflow: hidden;
+    background: var(--canvas);
+    color: var(--ink);
+    font-family: var(--font-ui);
+  }
+  #game, #game canvas { position: fixed; inset: 0; display: block; }
+  #hud { position: fixed; inset: 0; pointer-events: none; }
+
+  #crosshair { position: fixed; left: 50%; top: 50%; width: 22px; height: 22px; transform: translate(-50%, -50%); }
+  #crosshair i { position: absolute; background: var(--ink); opacity: .85; }
+  #crosshair i:nth-child(1) { left: 10px; top: 0; width: 2px; height: 7px; }
+  #crosshair i:nth-child(2) { left: 10px; bottom: 0; width: 2px; height: 7px; }
+  #crosshair i:nth-child(3) { top: 10px; left: 0; height: 2px; width: 7px; }
+  #crosshair i:nth-child(4) { top: 10px; right: 0; height: 2px; width: 7px; }
+
+  #hitmarker { position: fixed; left: 50%; top: 50%; width: 26px; height: 26px; transform: translate(-50%, -50%) rotate(45deg); opacity: 0; transition: opacity 90ms linear; }
+  #hitmarker.on { opacity: 1; }
+  #hitmarker.kill i { background: var(--danger); }
+  #hitmarker i { position: absolute; background: var(--accent); }
+  #hitmarker i:nth-child(1) { left: 12px; top: 0; width: 2px; height: 8px; }
+  #hitmarker i:nth-child(2) { left: 12px; bottom: 0; width: 2px; height: 8px; }
+  #hitmarker i:nth-child(3) { top: 12px; left: 0; height: 2px; width: 8px; }
+  #hitmarker i:nth-child(4) { top: 12px; right: 0; height: 2px; width: 8px; }
+
+  #topbar {
+    position: fixed; top: 18px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 14px;
+    font-family: var(--font-readout); font-size: 15px;
+  }
+  #round-label { color: var(--muted); font-size: 12px; letter-spacing: .12em; }
+  #score-attack { color: var(--jackal); font-weight: 700; }
+  #score-defend { color: var(--sentinel); font-weight: 700; }
+  #timer { font-size: 22px; font-weight: 600; min-width: 64px; text-align: center; }
+  #timer.urgent { color: var(--danger); }
+
+  #alive { position: fixed; top: 56px; left: 50%; transform: translateX(-50%); font-family: var(--font-readout); font-size: 13px; letter-spacing: .2em; }
+  #alive-attack { color: var(--jackal); }
+  #alive-defend { color: var(--sentinel); }
+
+  #bomb-status {
+    position: fixed; top: 18px; left: 24px;
+    font-family: var(--font-readout); font-size: 13px; color: var(--accent);
+    background: color-mix(in srgb, var(--canvas) 70%, transparent);
+    border: 1px solid var(--hairline); border-radius: var(--radius);
+    padding: 6px 10px;
+  }
+  #bomb-status[hidden] { display: none; }
+
+  #killfeed { position: fixed; top: 18px; right: 24px; display: grid; gap: 4px; justify-items: end; font-size: 13px; }
+  .feed-entry { background: color-mix(in srgb, var(--canvas) 70%, transparent); border-radius: var(--radius); padding: 3px 8px; }
+  .feed-entry .attack { color: var(--jackal); }
+  .feed-entry .defend { color: var(--sentinel); }
+  .feed-head { color: var(--accent); }
+
+  #health { position: fixed; left: 28px; bottom: 24px; width: 220px; }
+  #health-bar-wrap { height: 6px; background: var(--hairline); border-radius: 3px; overflow: hidden; margin-bottom: 6px; }
+  #health-bar { height: 100%; width: 100%; background: var(--ink); transition: width 120ms linear; }
+  #health.low #health-bar { background: var(--danger); }
+  #health-readout { font-family: var(--font-readout); font-size: 15px; }
+  #health-readout span + span { color: var(--muted); margin-left: 10px; }
+
+  #ammo { position: fixed; right: 28px; bottom: 20px; text-align: right; }
+  #ammo-readout { font-family: var(--font-readout); font-size: 52px; line-height: 1; letter-spacing: -0.03em; }
+  #ammo.empty #ammo-mag { color: var(--accent); }
+  #ammo-reserve { font-size: 15px; color: var(--muted); }
+  #weapon-name { font-size: 12px; letter-spacing: .14em; color: var(--muted); text-transform: uppercase; margin-top: 4px; }
+
+  #money { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); font-family: var(--font-readout); font-size: 16px; color: var(--accent); }
+  #spectate { position: fixed; left: 50%; bottom: 56px; transform: translateX(-50%); font-size: 13px; color: var(--muted); }
+  #spectate[hidden] { display: none; }
+
+  #buy-menu {
+    position: fixed; left: 24px; top: 50%; transform: translateY(-50%);
+    width: 300px; padding: 16px;
+    background: color-mix(in srgb, var(--surface) 92%, transparent);
+    border: 1px solid var(--hairline); border-radius: var(--radius);
+  }
+  #buy-menu[hidden] { display: none; }
+  #buy-menu h2 { margin: 0 0 4px; font-size: 15px; letter-spacing: .1em; }
+  #buy-menu .buy-sub { margin: 0 0 12px; font-size: 12px; color: var(--muted); }
+  #buy-money { color: var(--accent); font-family: var(--font-readout); }
+  .buy-row { display: flex; align-items: center; gap: 10px; padding: 7px 4px; border-top: 1px solid var(--hairline); font-size: 14px; }
+  .buy-key { font-family: var(--font-readout); font-size: 11px; color: var(--muted); border: 1px solid var(--hairline); border-radius: 3px; padding: 2px 6px; }
+  .buy-name { flex: 1; }
+  .buy-price { font-family: var(--font-readout); color: var(--accent); }
+  .buy-row.owned .buy-name { color: var(--muted); }
+  .buy-row.owned .buy-price { color: var(--muted); }
+  .buy-row.poor { opacity: .45; }
+
+  #banner { position: fixed; left: 50%; top: 22%; transform: translateX(-50%); text-align: center; }
+  #banner[hidden] { display: none; }
+  .banner-main { font-size: 34px; font-weight: 600; letter-spacing: -0.01em; text-shadow: 0 2px 12px rgba(0,0,0,.7); }
+  .banner-sub { margin-top: 6px; font-size: 15px; color: var(--muted); }
+
+  .overlay { position: fixed; inset: 0; display: grid; place-items: center; padding: 24px; background: color-mix(in srgb, var(--canvas) 82%, transparent); }
+  .overlay[hidden] { display: none; }
+  .panel { width: min(460px, 100%); padding: 32px; background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius); }
+  .panel h1 { margin: 0 0 8px; font-size: 32px; line-height: 1.15; font-weight: 600; letter-spacing: -0.02em; }
+  .panel h1 .dock { color: var(--accent); }
+  .panel p { margin: 0 0 24px; font-size: 15px; line-height: 1.55; color: var(--muted); }
+  #play { font: inherit; font-weight: 600; padding: 12px 18px; border: 1px solid var(--accent); border-radius: 8px; background: var(--accent); color: var(--canvas); cursor: pointer; }
+  #play:hover { background: var(--ink); border-color: var(--ink); }
+  .keys { margin: 24px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; font-size: 13px; color: var(--muted); }
+  .keys li { display: flex; align-items: center; gap: 8px; }
+  .keys kbd { min-width: 24px; padding: 2px 6px; border: 1px solid var(--hairline); border-radius: var(--radius); font-family: var(--font-readout); font-size: 11px; color: var(--ink); text-align: center; }
+</style>
+</head>
+<body>
+<div id="game"></div>
+
+<div id="hud" aria-hidden="true">
+  <div id="crosshair"><i></i><i></i><i></i><i></i></div>
+  <div id="hitmarker"><i></i><i></i><i></i><i></i></div>
+
+  <div id="topbar">
+    <span id="round-label">ROUND 1</span>
+    <span><span id="score-attack">0</span> — <span id="score-defend">0</span></span>
+    <span id="timer">0:12</span>
+  </div>
+  <div id="alive"><span id="alive-attack">●●●●●</span> &nbsp;vs&nbsp; <span id="alive-defend">●●●●●</span></div>
+  <div id="bomb-status" hidden></div>
+  <div id="killfeed"></div>
+
+  <div id="health">
+    <div id="health-bar-wrap"><div id="health-bar"></div></div>
+    <div id="health-readout"><span>HP <b id="health-value">100</b></span><span>ARMOR <b id="armor-value">0</b></span></div>
+  </div>
+  <div id="ammo">
+    <div id="ammo-readout"><span id="ammo-mag">12</span><span id="ammo-reserve">/ 36</span></div>
+    <div id="weapon-name">Dagger P9</div>
+  </div>
+  <div id="money"><span id="money-value">$800</span></div>
+  <div id="spectate" hidden></div>
+
+  <div id="buy-menu" hidden>
+    <h2>BUY PHASE</h2>
+    <p class="buy-sub">Press 1–6 to buy. Wallet: <span id="buy-money">$800</span></p>
+  </div>
+
+  <div id="banner" hidden>
+    <div class="banner-main"></div>
+    <div class="banner-sub"></div>
+  </div>
+</div>
+
+<div id="overlay" class="overlay">
+  <section class="panel" role="dialog" aria-modal="true" aria-labelledby="overlay-title">
+    <h1 id="overlay-title">BLACKWATER <span class="dock">DOCK</span></h1>
+    <p id="overlay-copy">Night shift at the container terminal. Jackals attack: plant the device at crane control (A) or the warehouse (B), or eliminate the Sentinels. First to 8 rounds takes the match.</p>
+    <button id="play" type="button">Click to play</button>
+    <ul class="keys">
+      <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> Move</li>
+      <li><kbd>Mouse</kbd> Look</li>
+      <li><kbd>Click</kbd> Fire</li>
+      <li><kbd>R</kbd> Reload</li>
+      <li><kbd>G</kbd> Throw grenade</li>
+      <li><kbd>E</kbd> Hold to plant / defuse</li>
+      <li><kbd>1–6</kbd> Buy during buy phase</li>
+      <li><kbd>Ctrl</kbd> Crouch</li>
+      <li><kbd>Space</kbd> Jump</li>
+    </ul>
+  </section>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three/three.module.min.js"
+  }
+}
+</script>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
