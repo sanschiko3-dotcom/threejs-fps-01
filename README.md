@@ -1,73 +1,86 @@
-# BLACKWATER DOCK — 5v5 plant/defuse tactical FPS
+# BLACKWATER DOCK
 
-A round-based tactical shooter in three.js, built for the make.fun
+A 5v5 plant/defuse tactical FPS in three.js, built for the make.fun
 `threejs-fps-01` bounty. Two teams of five fight over a harbour container
-yard at night. The Jackals attack, the Sentinels defend, and the first team
-to 8 rounds takes the match (15 rounds max; 7–7 is a draw).
+yard at night. The Jackals attack, the Sentinels defend, and the first
+team to 8 rounds takes the match — 15 rounds max, 7–7 is a draw.
 
-## How a match plays
+## A match, minute by minute
 
-The human player is a Jackal and carries the device from the start of every
-round. Plant it at site A (the gantry crane) or site B (the warehouse), or
-wipe out the Sentinels. Die while carrying it and the device drops — a
-teammate has to walk over it to pick it back up. The Sentinels win a round
-by holding both sites, defusing a planted device, or running the clock out.
+You are a Jackal, and you carry the device from the start of every round.
+Plant it at site A (the gantry crane) or site B (the warehouse), or wipe
+out the Sentinels. If you die while carrying it, the device drops where
+you fell and a teammate has to walk over it to pick it back up. The
+Sentinels take a round by holding both sites, defusing a planted device,
+or running the clock out.
 
-Each round opens with a 12-second buy phase, then 100 seconds of live play.
-Rounds are worth $3250 to the winners and $1900 to the losers, with a $500
-loss-streak bonus (max two in a row); kills pay $300. You start each match
-with $800.
+Every round opens with a 12-second buy phase, then 100 seconds of live
+play. A round win pays $3250, a loss $1900, with a $500 loss-streak bonus
+(max two in a row); every kill pays $300. Each match starts you on $800.
 
-## The shooting
+## Guns, money, and movement
 
-Four weapons plus grenades: the Dagger P9 sidearm (free), the Stinger-9 SMG
-($1500), the AR-77 Kestrel rifle ($2700) and the Longshot-7 DMR ($4750), plus
-HE grenades ($300) and Kevlar ($650). Fire is hitscan against body hitboxes
-with 4× headshot damage. Recoil and spread grow when you fire on the move,
-so planting your feet to aim pays off. Movement is acceleration-based with
-crouching, jumping and AABB collision against the yard's containers, crates
-and walls.
+The armoury is four weapons plus grenades: the Dagger P9 sidearm (free),
+the Stinger-9 SMG ($1500), the AR-77 Kestrel rifle ($2700), the
+Longshot-7 DMR ($4750), HE grenades ($300) and Kevlar ($650). Fire is
+hitscan against body hitboxes, with 4× damage on a headshot. Recoil and
+spread both grow when you shoot on the move, so planting your feet to
+aim pays off. Movement is acceleration-based — crouch, jump, and AABB
+collision against the yard's containers, crates and walls.
 
-Nine bots fill out both teams and play the objective: per-round plans (A
-push down the quay, B push down the alley, split, mid hold), holding angles,
-reacting to gunfire they hear within 26 m, planting when a site is clear and
-defusing when the device is down. They navigate a waypoint graph with BFS,
-see through a 110° field of view, and only shoot what they have line of
-sight to (segment-vs-AABB checks).
+## The other nine players
 
-## The map
+Nine bots fill both teams and play the objective, not just the frags.
+Each round they pick a plan — A push down the quay, B push down the
+alley, a split, or a mid hold — then hold angles, react to gunfire they
+hear within 26 m, plant when a site is clear, and defuse when the device
+is down. They route over a waypoint graph with BFS, see through a 110°
+field of view, and only shoot what they have line of sight to
+(segment-vs-AABB checks, no raycasts in the hot loop).
+
+## The yard
 
 An original night terminal, 64 × 48 m: a gantry crane over site A, a
-warehouse with a 6 m doorway over site B, container rows stacked up to three
-high through mid, a quay lane along the harbour water, and sodium
-floodlights pooling warm orange over cold blue dark. Three lanes connect the
-spawns to the sites — west quay, mid container rows, east alley.
+warehouse with a 6 m doorway over site B, container rows stacked up to
+three high through mid, a quay lane along the harbour water, and sodium
+floodlights pooling warm orange over cold blue dark. Three lanes connect
+the spawns to the sites — west quay, mid container rows, east alley.
 
-## Presentation
+## Look and sound
 
-Procedural WebAudio for gunfire, beeps and explosions (no audio files),
-pooled tracers, muzzle flash, hit sparks and a bomb explosion, and a full
-HUD: health, armour, ammunition, round timer, score, money, alive counts,
-killfeed and bomb status. Die and you spectate a living teammate (click to
-switch between them).
+All sound is procedural WebAudio — gunfire, beeps, explosions — with no
+audio files. The visuals are pooled tracers, muzzle flash, hit sparks and
+a bomb explosion, plus a full HUD: health, armour, ammunition, round
+timer, score, money, alive counts, killfeed and bomb status. Die and you
+spectate a living teammate; click to switch between them.
 
 ## Controls
 
-WASD move · mouse look · click fire · R reload · G throw grenade · E hold to
-plant / defuse · 1–6 buy during the buy phase · Ctrl crouch · Space jump ·
-C cycle spectate while dead.
+| Input | Does |
+| --- | --- |
+| WASD | Move |
+| Mouse | Look |
+| Click | Fire |
+| R | Reload |
+| G | Throw grenade |
+| E (hold) | Plant / defuse |
+| 1–6 | Buy during the buy phase |
+| Ctrl | Crouch |
+| Space | Jump |
+| C | Cycle spectate while dead |
 
-## How it is built
+## Under the hood
 
-- `game/index.html` — import map for three.js 0.187.0 (vendored byte for
-  byte) and the HUD shell.
+- `game/index.html` — the HUD shell and the import map for three.js
+  0.187.0, vendored byte for byte.
 - `game/src/` — one module per job: `map` (the dock, waypoint graph and
-  line-of-sight), `player` (movement and the shared AABB slide), `weapons`
-  (definitions and view models), `bots` (AI: routes, perception, bursts,
-  plant/defuse), `rounds` (match state machine, economy and the bomb),
-  `effects` (pooled tracers, sparks, explosion), `audio` (synthesised
-  sound effects), `hud` (DOM), `input` (pointer lock and keys), `main`
-  (boot, fixed 60 Hz simulation, render loop).
+  line-of-sight), `player` (movement and the shared AABB slide),
+  `weapons` (definitions and view models), `bots` (AI: routes,
+  perception, bursts, plant/defuse), `rounds` (match state machine,
+  economy and the bomb), `effects` (pooled tracers, sparks, explosion),
+  `audio` (synthesised sound effects), `hud` (DOM), `input` (pointer
+  lock and keys), `main` (boot, the fixed 60 Hz simulation, the render
+  loop, and the screenshot staging).
 - The simulation steps at a fixed 60 Hz, kept apart from rendering, with
   pooled vectors and effects — nothing allocates in the hot loops.
 - `main.ts` copies `game/` and `screenshots/` to `/output` and writes
@@ -76,9 +89,9 @@ C cycle spectate while dead.
 ## Screenshots
 
 `?shot=start|play|plant|end&seed=N` stages a deterministic frame — buy
-phase, mid firefight, planted device, round won — for capture; the page sets
-`window.__shotReady` once the frame is painted. The four screenshots in
-`screenshots/` are real renders of this code in desktop Chrome.
+phase, mid firefight, planted device, round won — for capture; the page
+sets `window.__shotReady` once the frame is painted. The four screenshots
+in `screenshots/` are real renders of this code in desktop Chrome.
 
 ## Play locally
 

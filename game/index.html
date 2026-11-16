@@ -5,8 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Blackwater Dock — a three.js tactical FPS</title>
 <style>
-  /* Night terminal: deep blue-black canvas, cold concrete surfaces, one
-     sodium-orange accent. Six colours, nothing else, on the page or in 3D. */
+  /* The page is the night terminal too: deep blue-black canvas, cold
+     concrete surfaces, one sodium-orange accent. Six colours, nothing
+     else, on the page or in 3D. */
   :root {
     --canvas: #0a0e16;
     --surface: #141a24;
@@ -33,37 +34,74 @@
   #game, #game canvas { position: fixed; inset: 0; display: block; }
   #hud { position: fixed; inset: 0; pointer-events: none; }
 
-  #crosshair { position: fixed; left: 50%; top: 50%; width: 22px; height: 22px; transform: translate(-50%, -50%); }
+  /* Crosshair: four short ticks around the centre. */
+  #crosshair {
+    position: fixed; left: 50%; top: 50%;
+    width: 22px; height: 22px; transform: translate(-50%, -50%);
+  }
   #crosshair i { position: absolute; background: var(--ink); opacity: .85; }
-  #crosshair i:nth-child(1) { left: 10px; top: 0; width: 2px; height: 7px; }
-  #crosshair i:nth-child(2) { left: 10px; bottom: 0; width: 2px; height: 7px; }
-  #crosshair i:nth-child(3) { top: 10px; left: 0; height: 2px; width: 7px; }
-  #crosshair i:nth-child(4) { top: 10px; right: 0; height: 2px; width: 7px; }
+  #crosshair i:nth-child(1) {
+    left: 10px; top: 0; width: 2px; height: 7px;
+  }
+  #crosshair i:nth-child(2) {
+    left: 10px; bottom: 0; width: 2px; height: 7px;
+  }
+  #crosshair i:nth-child(3) {
+    top: 10px; left: 0; height: 2px; width: 7px;
+  }
+  #crosshair i:nth-child(4) {
+    top: 10px; right: 0; height: 2px; width: 7px;
+  }
 
-  #hitmarker { position: fixed; left: 50%; top: 50%; width: 26px; height: 26px; transform: translate(-50%, -50%) rotate(45deg); opacity: 0; transition: opacity 90ms linear; }
+  /* Hitmarker: the same four ticks, rotated 45°, orange (red on a kill). */
+  #hitmarker {
+    position: fixed; left: 50%; top: 50%;
+    width: 26px; height: 26px;
+    transform: translate(-50%, -50%) rotate(45deg);
+    opacity: 0; transition: opacity 90ms linear;
+  }
   #hitmarker.on { opacity: 1; }
   #hitmarker.kill i { background: var(--danger); }
   #hitmarker i { position: absolute; background: var(--accent); }
-  #hitmarker i:nth-child(1) { left: 12px; top: 0; width: 2px; height: 8px; }
-  #hitmarker i:nth-child(2) { left: 12px; bottom: 0; width: 2px; height: 8px; }
-  #hitmarker i:nth-child(3) { top: 12px; left: 0; height: 2px; width: 8px; }
-  #hitmarker i:nth-child(4) { top: 12px; right: 0; height: 2px; width: 8px; }
+  #hitmarker i:nth-child(1) {
+    left: 12px; top: 0; width: 2px; height: 8px;
+  }
+  #hitmarker i:nth-child(2) {
+    left: 12px; bottom: 0; width: 2px; height: 8px;
+  }
+  #hitmarker i:nth-child(3) {
+    top: 12px; left: 0; height: 2px; width: 8px;
+  }
+  #hitmarker i:nth-child(4) {
+    top: 12px; right: 0; height: 2px; width: 8px;
+  }
 
+  /* Top centre: round label, score, clock. */
   #topbar {
     position: fixed; top: 18px; left: 50%; transform: translateX(-50%);
     display: flex; align-items: center; gap: 14px;
     font-family: var(--font-readout); font-size: 15px;
   }
-  #round-label { color: var(--muted); font-size: 12px; letter-spacing: .12em; }
+  #round-label {
+    color: var(--muted); font-size: 12px; letter-spacing: .12em;
+  }
   #score-attack { color: var(--jackal); font-weight: 700; }
   #score-defend { color: var(--sentinel); font-weight: 700; }
-  #timer { font-size: 22px; font-weight: 600; min-width: 64px; text-align: center; }
+  #timer {
+    font-size: 22px; font-weight: 600;
+    min-width: 64px; text-align: center;
+  }
   #timer.urgent { color: var(--danger); }
 
-  #alive { position: fixed; top: 56px; left: 50%; transform: translateX(-50%); font-family: var(--font-readout); font-size: 13px; letter-spacing: .2em; }
+  /* Alive pips, just under the top bar. */
+  #alive {
+    position: fixed; top: 56px; left: 50%; transform: translateX(-50%);
+    font-family: var(--font-readout); font-size: 13px; letter-spacing: .2em;
+  }
   #alive-attack { color: var(--jackal); }
   #alive-defend { color: var(--sentinel); }
 
+  /* Device status, top left. */
   #bomb-status {
     position: fixed; top: 18px; left: 24px;
     font-family: var(--font-readout); font-size: 13px; color: var(--accent);
@@ -73,29 +111,52 @@
   }
   #bomb-status[hidden] { display: none; }
 
+  /* Killfeed, top right. */
   #killfeed { position: fixed; top: 18px; right: 24px; display: grid; gap: 4px; justify-items: end; font-size: 13px; }
   .feed-entry { background: color-mix(in srgb, var(--canvas) 70%, transparent); border-radius: var(--radius); padding: 3px 8px; }
   .feed-entry .attack { color: var(--jackal); }
   .feed-entry .defend { color: var(--sentinel); }
   .feed-head { color: var(--accent); }
 
+  /* Bottom left: health bar + readout. */
   #health { position: fixed; left: 28px; bottom: 24px; width: 220px; }
-  #health-bar-wrap { height: 6px; background: var(--hairline); border-radius: 3px; overflow: hidden; margin-bottom: 6px; }
-  #health-bar { height: 100%; width: 100%; background: var(--ink); transition: width 120ms linear; }
+  #health-bar-wrap {
+    height: 6px; background: var(--hairline);
+    border-radius: 3px; overflow: hidden; margin-bottom: 6px;
+  }
+  #health-bar {
+    height: 100%; width: 100%;
+    background: var(--ink); transition: width 120ms linear;
+  }
   #health.low #health-bar { background: var(--danger); }
   #health-readout { font-family: var(--font-readout); font-size: 15px; }
   #health-readout span + span { color: var(--muted); margin-left: 10px; }
 
+  /* Bottom right: big ammo count, weapon name under it. */
   #ammo { position: fixed; right: 28px; bottom: 20px; text-align: right; }
-  #ammo-readout { font-family: var(--font-readout); font-size: 52px; line-height: 1; letter-spacing: -0.03em; }
+  #ammo-readout {
+    font-family: var(--font-readout); font-size: 52px;
+    line-height: 1; letter-spacing: -0.03em;
+  }
   #ammo.empty #ammo-mag { color: var(--accent); }
   #ammo-reserve { font-size: 15px; color: var(--muted); }
-  #weapon-name { font-size: 12px; letter-spacing: .14em; color: var(--muted); text-transform: uppercase; margin-top: 4px; }
+  #weapon-name {
+    font-size: 12px; letter-spacing: .14em; color: var(--muted);
+    text-transform: uppercase; margin-top: 4px;
+  }
 
-  #money { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); font-family: var(--font-readout); font-size: 16px; color: var(--accent); }
-  #spectate { position: fixed; left: 50%; bottom: 56px; transform: translateX(-50%); font-size: 13px; color: var(--muted); }
+  /* Bottom centre: wallet, and the spectate line above it. */
+  #money {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+    font-family: var(--font-readout); font-size: 16px; color: var(--accent);
+  }
+  #spectate {
+    position: fixed; left: 50%; bottom: 56px; transform: translateX(-50%);
+    font-size: 13px; color: var(--muted);
+  }
   #spectate[hidden] { display: none; }
 
+  /* Buy menu, mid-left. Rows are built by hud.js. */
   #buy-menu {
     position: fixed; left: 24px; top: 50%; transform: translateY(-50%);
     width: 300px; padding: 16px;
@@ -106,30 +167,66 @@
   #buy-menu h2 { margin: 0 0 4px; font-size: 15px; letter-spacing: .1em; }
   #buy-menu .buy-sub { margin: 0 0 12px; font-size: 12px; color: var(--muted); }
   #buy-money { color: var(--accent); font-family: var(--font-readout); }
-  .buy-row { display: flex; align-items: center; gap: 10px; padding: 7px 4px; border-top: 1px solid var(--hairline); font-size: 14px; }
-  .buy-key { font-family: var(--font-readout); font-size: 11px; color: var(--muted); border: 1px solid var(--hairline); border-radius: 3px; padding: 2px 6px; }
+  .buy-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 7px 4px; border-top: 1px solid var(--hairline); font-size: 14px;
+  }
+  .buy-key {
+    font-family: var(--font-readout); font-size: 11px; color: var(--muted);
+    border: 1px solid var(--hairline); border-radius: 3px; padding: 2px 6px;
+  }
   .buy-name { flex: 1; }
   .buy-price { font-family: var(--font-readout); color: var(--accent); }
   .buy-row.owned .buy-name { color: var(--muted); }
   .buy-row.owned .buy-price { color: var(--muted); }
   .buy-row.poor { opacity: .45; }
 
-  #banner { position: fixed; left: 50%; top: 22%; transform: translateX(-50%); text-align: center; }
+  /* Round banner, upper middle. */
+  #banner {
+    position: fixed; left: 50%; top: 22%;
+    transform: translateX(-50%); text-align: center;
+  }
   #banner[hidden] { display: none; }
-  .banner-main { font-size: 34px; font-weight: 600; letter-spacing: -0.01em; text-shadow: 0 2px 12px rgba(0,0,0,.7); }
+  .banner-main {
+    font-size: 34px; font-weight: 600; letter-spacing: -0.01em;
+    text-shadow: 0 2px 12px rgba(0,0,0,.7);
+  }
   .banner-sub { margin-top: 6px; font-size: 15px; color: var(--muted); }
 
-  .overlay { position: fixed; inset: 0; display: grid; place-items: center; padding: 24px; background: color-mix(in srgb, var(--canvas) 82%, transparent); }
+  /* Full-screen overlays: start / paused / match end. */
+  .overlay {
+    position: fixed; inset: 0; display: grid; place-items: center;
+    padding: 24px; background: color-mix(in srgb, var(--canvas) 82%, transparent);
+  }
   .overlay[hidden] { display: none; }
-  .panel { width: min(460px, 100%); padding: 32px; background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius); }
-  .panel h1 { margin: 0 0 8px; font-size: 32px; line-height: 1.15; font-weight: 600; letter-spacing: -0.02em; }
+  .panel {
+    width: min(460px, 100%); padding: 32px;
+    background: var(--surface);
+    border: 1px solid var(--hairline); border-radius: var(--radius);
+  }
+  .panel h1 {
+    margin: 0 0 8px; font-size: 32px; line-height: 1.15;
+    font-weight: 600; letter-spacing: -0.02em;
+  }
   .panel h1 .dock { color: var(--accent); }
   .panel p { margin: 0 0 24px; font-size: 15px; line-height: 1.55; color: var(--muted); }
-  #play { font: inherit; font-weight: 600; padding: 12px 18px; border: 1px solid var(--accent); border-radius: 8px; background: var(--accent); color: var(--canvas); cursor: pointer; }
+  #play {
+    font: inherit; font-weight: 600; padding: 12px 18px;
+    border: 1px solid var(--accent); border-radius: 8px;
+    background: var(--accent); color: var(--canvas); cursor: pointer;
+  }
   #play:hover { background: var(--ink); border-color: var(--ink); }
-  .keys { margin: 24px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; font-size: 13px; color: var(--muted); }
+  .keys {
+    margin: 24px 0 0; padding: 0; list-style: none;
+    display: grid; gap: 8px; font-size: 13px; color: var(--muted);
+  }
   .keys li { display: flex; align-items: center; gap: 8px; }
-  .keys kbd { min-width: 24px; padding: 2px 6px; border: 1px solid var(--hairline); border-radius: var(--radius); font-family: var(--font-readout); font-size: 11px; color: var(--ink); text-align: center; }
+  .keys kbd {
+    min-width: 24px; padding: 2px 6px;
+    border: 1px solid var(--hairline); border-radius: var(--radius);
+    font-family: var(--font-readout); font-size: 11px; color: var(--ink);
+    text-align: center;
+  }
 </style>
 </head>
 <body>
