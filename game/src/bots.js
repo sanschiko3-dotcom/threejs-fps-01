@@ -1,64 +1,82 @@
 // Bots: nine teammates and opponents with a real state machine.
-// Per round each team gets a plan (A push, B push, split, mid hold for the
-// Jackals; two-two-one for the Sentinels). Bots route on the waypoint graph,
-// hold angles, react to what they see (110° field of view, line of sight
-// through the map's AABBs) and to gunfire they hear within 26 m, fire in
-// bursts with a reaction delay and an aim error that shrinks as they track a
-// target, and plant or defuse when the site is theirs. One Jackal carries the
-// device; if he dies it drops and another Jackal must walk over it.
+// Each round the Jackals get a plan — A push, B push, split, or a mid hold —
+// while the Sentinels spread two-two-one across the sites. Bots route on the
+// waypoint graph, hold angles, react to what they see (110° field of view,
+// line of sight through the map's AABBs) and to gunfire they hear within
+// 26 m, fire in bursts with a reaction delay and an aim error that shrinks
+// as they track a target, and plant or defuse when the site is theirs. One
+// Jackal carries the device; if he dies it drops and another Jackal must
+// walk over it to pick it up.
 import * as THREE from 'three';
 import { createBody } from './player.js';
 import { WEAPON_DEFS } from './weapons.js';
 import { findRoute, segmentBlocked } from './map.js';
 import { PALETTE } from './palette.js';
 
+// Movement speed, perception cadence and ranges, plant/defuse channel times.
 const BOT_SPEED = 3.9;
 const PERCEIVE_EVERY = 0.22;
-const FOV_COS = Math.cos((110 * Math.PI) / 360); // half-angle 55°
+const FOV_COS = Math.cos((110 * Math.PI) / 360); // cos of the 55° half-angle
 const SEE_RANGE = 46;
 const HEAR_RANGE = 26;
 const PLANT_TIME = 3.5;
 const DEFUSE_TIME = 5;
 
+// Roster: four Jackal attackers, five Sentinel defenders.
 const JACKAL_NAMES = ['Rook', 'Vex', 'Marlowe', 'Kade'];
 const SENTINEL_NAMES = ['Harbor', 'Quay', 'Tamsin', 'Bollard', 'Wren'];
 
-function botMesh(team) {
-  const group = new THREE.Group();
-  const suit = new THREE.MeshStandardMaterial({
-    color: new THREE.Color(team === 'attack' ? PALETTE.jackal : PALETTE.sentinel),
-    roughness: 0.85,
-  });
-  const dark = new THREE.MeshStandardMaterial({ color: 0x1c1f24, roughness: 0.7, metalness: 0.2 });
-  const skin = new THREE.MeshStandardMaterial({ color: 0x8a6a4a, roughness: 0.9 });
+// Bot body parts: [size, offset] for each piece, built from two materials —
+// a team-tinted suit and dark trim — plus a skin-tone head. The gun is a
+// dark box held forward. All parts cast shadows.
+const BODY_PARTS = [
+  { key: 'torso', size: [0.52, 0.62, 0.3], at: [0, 1.08, 0], mat: 'suit' },
+  { key: 'head', size: [0.32, 0.32, 0.32], at: [0, 1.56, 0], mat: 'skin' },
+  { key: 'helmet', size: [0.36, 0.14, 0.36], at: [0, 1.72, 0], mat: 'dark' },
+  { key: 'legL', size: [0.2, 0.72, 0.24], at: [-0.14, 0.36, 0], mat: 'dark' },
+  { key: 'legR', size: [0.2, 0.72, 0.24], at: [0.14, 0.36, 0], mat: 'dark' },
+  { key: 'gun', size: [0.07, 0.09, 0.66], at: [0.2, 1.18, -0.3], mat: 'dark' },
+];
 
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.62, 0.3), suit);
-  torso.position.y = 1.08;
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.32, 0.32), skin);
-  head.position.y = 1.56;
-  const helmet = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.14, 0.36), dark);
-  helmet.position.y = 1.72;
-  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.72, 0.24), dark);
-  legL.position.set(-0.14, 0.36, 0);
-  const legR = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.72, 0.24), dark);
-  legR.position.set(0.14, 0.36, 0);
-  const gun = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.09, 0.66), dark);
-  gun.position.set(0.2, 1.18, -0.3);
-  group.add(torso, head, helmet, legL, legR, gun);
-  group.traverse((child) => {
-    child.castShadow = true;
-  });
-  return { group, torso, head };
+function buildBotMesh(team) {
+  const group = new THREE.Group();
+  const mats = {
+    suit: new THREE.MeshStandardMaterial({
+      color: new THREE.Color(team === 'attack' ? PALETTE.jackal : PALETTE.sentinel),
+      roughness: 0.85,
+    }),
+    dark: new THREE.MeshStandardMaterial({ color: 0x1c1f24, roughness: 0.7, metalness: 0.2 }),
+    skin: new THREE.MeshStandardMaterial({ color: 0x8a6a4a, roughness: 0.9 }),
+  };
+  const parts = {};
+  for (const part of BODY_PARTS) {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(...part.size), mats[part.mat]);
+    mesh.position.set(...part.at);
+    mesh.castShadow = true;
+    group.add(mesh);
+    parts[part.key] = mesh;
+  }
+  return { group, torso: parts.torso, head: parts.head };
+}
+
+// A fresh weapon loadout for a bot: pistol stats, ready to be overwritten
+// by the round economy in armBot.
+function freshWeapon(id) {
+  const def = WEAPON_DEFS[id];
+  return { id, mag: def.mag, reserve: def.reserve, lastShot: -10, reloadEnd: 0, reloading: false };
 }
 
 export function createBots(scene, map, hooks, rng) {
   const bots = [];
   const shootables = [];
 
+  // Create one bot at its team's spawn slot and wire its torso/head meshes
+  // into the hitscan list. Attacker spawn slot 0 belongs to the human
+  // player, so Jackal bots take slots 1-4.
   function addBot(name, team, spawnIndex) {
     const spawn = map.spawns[team][spawnIndex];
     const body = createBody(map.aabbs, map.bounds, spawn.x, spawn.z, spawn.yaw);
-    const { group, torso, head } = botMesh(team);
+    const { group, torso, head } = buildBotMesh(team);
     scene.add(group);
     const bot = {
       id: `${team}-${spawnIndex}`,
@@ -66,7 +84,7 @@ export function createBots(scene, map, hooks, rng) {
       team,
       body,
       mesh: group,
-      weapon: { id: 'dagger', mag: 12, reserve: 36, lastShot: -10, reloadEnd: 0, reloading: false },
+      weapon: freshWeapon('dagger'),
       state: 'idle',
       route: [],
       routeIndex: 0,
@@ -108,6 +126,8 @@ export function createBots(scene, map, hooks, rng) {
   // like a bot: target.body.state is the player's body state either way.
   const playerTarget = { isPlayer: true, name: 'You', team: 'attack', body: { state: null } };
 
+  // --- perception ---------------------------------------------------------
+  // Eye position of a bot, and chest position of a body (the aim point).
   function eyeOf(bot) {
     const p = bot.body.state.position;
     return { x: p.x, y: p.y + bot.body.state.eye, z: p.z };
@@ -118,6 +138,9 @@ export function createBots(scene, map, hooks, rng) {
     return { x: p.x, y: p.y + 1.2, z: p.z };
   }
 
+  // Can this bot see this body? Range, then field of view (skipped up
+  // close, where a bot notices anything next to it), then line of sight
+  // through the map's solid boxes.
   function canSee(bot, body) {
     const eye = eyeOf(bot);
     const chest = chestOf(body);
@@ -134,6 +157,8 @@ export function createBots(scene, map, hooks, rng) {
     return { dist, chest };
   }
 
+  // Nearest visible enemy: every living enemy bot, plus the human player
+  // when this bot defends (attackers never shoot their own teammate).
   function nearestEnemy(bot) {
     let best = null;
     let bestDist = Infinity;
@@ -156,6 +181,9 @@ export function createBots(scene, map, hooks, rng) {
     return best;
   }
 
+  // --- movement -----------------------------------------------------------
+  // Route to a point over the waypoint graph; fall back to a straight walk
+  // when the graph gives nothing.
   function setRoute(bot, to) {
     const from = bot.body.state.position;
     const route = findRoute(map.waypoints, { x: from.x, z: from.z }, to);
@@ -178,6 +206,8 @@ export function createBots(scene, map, hooks, rng) {
     bot.routeIndex = 0;
   }
 
+  // Next step along the current route: a unit direction, or arrived when the
+  // route is exhausted. Waypoints within 0.7 m count as reached.
   function routeStep(bot, dt, speed) {
     if (bot.routeIndex >= bot.route.length) return { x: 0, z: 0, arrived: true };
     const target = bot.route[bot.routeIndex];
@@ -192,6 +222,7 @@ export function createBots(scene, map, hooks, rng) {
     return { x: dx / dist, z: dz / dist, arrived: false };
   }
 
+  // Turn the bot's yaw toward a point, fastest way around, capped by rate.
   function faceToward(bot, x, z, dt, rate = 7) {
     const p = bot.body.state.position;
     const want = Math.atan2(-(x - p.x), -(z - p.z));
@@ -201,6 +232,9 @@ export function createBots(scene, map, hooks, rng) {
     bot.body.state.yaw += diff * Math.min(1, rate * dt);
   }
 
+  // --- plans --------------------------------------------------------------
+  // Round plan for a team. Defenders always hold; attackers push A or B on
+  // round one, then mostly push a site, sometimes split, rarely hold mid.
   function choosePlan(team, round) {
     if (team === 'defend') return 'hold';
     const roll = rng.random();
@@ -211,13 +245,15 @@ export function createBots(scene, map, hooks, rng) {
     return 'mid-hold';
   }
 
+  // Which site this attacker is playing for under the plan. Split alternates
+  // down the roster; mid-hold drifts to a site after the pause.
   function siteTarget(bot, plan) {
     if (bot.team === 'defend') return null;
     const index = bots.filter((b) => b.team === 'attack').indexOf(bot);
     if (plan === 'a-push') return 'A';
     if (plan === 'b-push') return 'B';
     if (plan === 'split') return index % 2 === 0 ? 'A' : 'B';
-    return index < 2 ? 'A' : 'B'; // mid-hold: drift to a site after the pause
+    return index < 2 ? 'A' : 'B';
   }
 
   function sitePoint(site) {
@@ -225,22 +261,25 @@ export function createBots(scene, map, hooks, rng) {
     return { x: s.x, z: s.z };
   }
 
+  // Simple economy: pistols round one, rifles once the match is moving,
+  // one DMR per team from round three.
   function armBot(bot, round) {
-    // Simple economy: pistols round one, rifles once the match is moving,
-    // one DMR per team from round three.
     const teamBots = bots.filter((b) => b.team === bot.team);
     const index = teamBots.indexOf(bot);
     let id = 'dagger';
     if (round >= 2) id = index < 3 ? 'kestrel' : 'stinger';
     if (round >= 3 && index === 0) id = 'longshot';
-    const def = WEAPON_DEFS[id];
-    bot.weapon = { id, mag: def.mag, reserve: def.reserve, lastShot: -10, reloadEnd: 0, reloading: false };
+    bot.weapon = freshWeapon(id);
   }
 
+  // Reset every bot for a new round: back to spawn, fresh weapon, fresh plan.
+  // Defenders walk to their site (first two to A, next two to B, the fifth
+  // holds mid); attackers take their plan's lane, or hold mid first on a
+  // mid-hold. No bot carries the device at round start: the human player is
+  // the carrier, and a bot only becomes carrier by picking up a dropped device.
   function spawnRound(round) {
     const attackPlan = choosePlan('attack', round);
     for (const bot of bots) {
-      // Attacker spawn 0 belongs to the human player; bots take 1-4.
       const teamIndex = bots.filter((b) => b.team === bot.team).indexOf(bot);
       const spawn = map.spawns[bot.team][bot.team === 'attack' ? teamIndex + 1 : teamIndex];
       bot.body.reset(spawn.x, spawn.z, spawn.yaw);
@@ -289,10 +328,12 @@ export function createBots(scene, map, hooks, rng) {
         bot.state = 'toSite';
       }
     }
-    // No bot carries the device at round start: the human player is the
-    // carrier. A bot only becomes carrier by picking up a dropped device.
   }
 
+  // --- combat -------------------------------------------------------------
+  // One tick of a bot that has a target: face it, strafe and mind the range,
+  // then fire in bursts once the reaction delay has passed. Aim error starts
+  // wide and shrinks as the bot tracks — fresh targets are hard to hit.
   function fightStep(bot, dt, now) {
     const target = bot.target;
     if (!target || !target.body.state.alive) {
@@ -351,7 +392,6 @@ export function createBots(scene, map, hooks, rng) {
     w.lastShot = now;
     w.mag -= 1;
     bot.burstLeft -= 1;
-    // Aim error shrinks as the bot tracks: fresh targets are hard to hit.
     const error = Math.max(0.012, 0.075 - bot.trackTime * 0.045) * (1 + dist / 40);
     const aimY = tp.y + (rng.chance(0.25) ? 1.5 : 1.2);
     const eye = eyeOf(bot);
@@ -363,11 +403,12 @@ export function createBots(scene, map, hooks, rng) {
     hooks.shoot(bot, new THREE.Vector3(eye.x, eye.y, eye.z), dir);
   }
 
+  // --- the brain ----------------------------------------------------------
+  // One tick of one bot. Buy phase: stand at spawn — perception and fighting
+  // belong to the live round only, or bots spot and shoot each other across
+  // the map during the 12 s buy and the round starts with corpses.
   function stepBot(bot, dt, now, ctx) {
     if (!bot.body.state.alive) return;
-    // Buy phase: stand at spawn. Perception and fighting belong to the live
-    // round only — without this guard bots spot and shoot each other across
-    // the map during the 12 s buy and the round starts with corpses.
     if (ctx.phase !== 'live') return;
     const p = bot.body.state.position;
 
@@ -499,6 +540,7 @@ export function createBots(scene, map, hooks, rng) {
     }
   }
 
+  // Copy body state into the visible meshes every tick.
   function syncMeshes() {
     for (const bot of bots) {
       const p = bot.body.state.position;
@@ -539,6 +581,8 @@ export function createBots(scene, map, hooks, rng) {
       return bots.find((b) => b.isCarrier && b.body.state.alive) || null;
     },
 
+    // A shot rings out: enemy bots holding position nearby turn to
+    // investigate it for a few seconds.
     hearShot(pos, team) {
       for (const bot of bots) {
         if (!bot.body.state.alive || bot.team === team) continue;
@@ -551,6 +595,8 @@ export function createBots(scene, map, hooks, rng) {
       }
     },
 
+    // A bot died: hide the mesh, and if it carried the device, drop it
+    // where it fell so another Jackal can pick it up.
     handleDeath(bot) {
       bot.state = 'dead';
       bot.target = null;

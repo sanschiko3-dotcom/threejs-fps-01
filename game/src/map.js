@@ -1,14 +1,17 @@
 // BLACKWATER DOCK — a night container terminal, 64 x 48 m.
-// Attackers (Jackals) spawn south, defenders (Sentinels) spawn north.
-// Site A: the gantry crane in the north-west. Site B: the warehouse north-east.
-// Three lanes run north-south: the west quay, the container rows of mid, and
-// the east alley. Containers stack 1-3 high and break every sightline; the
-// crane and the warehouse are the two landmarks the round is fought over.
+// Attackers (Jackals) spawn south and push north; defenders (Sentinels)
+// spawn north and hold the two sites. Site A is the gantry crane in the
+// north-west; site B is the warehouse in the north-east. Three lanes run
+// north-south — the west quay, the container rows of mid, and the east
+// alley — and the stacked containers break every long sightline so no
+// single angle covers the whole yard.
 //
 // Coordinates: x east, z north is negative. Attackers face -z (yaw 0).
 import * as THREE from 'three';
 import { PALETTE, CONTAINER_COLORS } from './palette.js';
 
+// Yard bounds, plant zones and round timings. rounds.js reads buyTime and
+// roundTime from here, so the map is the single source of truth for them.
 export const MAP = {
   bounds: { minX: -32, maxX: 32, minZ: -24, maxZ: 24 },
   siteA: { x: -22, z: -15, r: 5 },
@@ -17,8 +20,9 @@ export const MAP = {
   buyTime: 12,
 };
 
-// Waypoint graph bots route on. Nodes are open ground; edges are walkable
-// straight lines (no container or wall crosses them).
+// Waypoint graph the bots route on. Nodes sit on open ground; every edge is
+// a walkable straight line — no container or wall crosses one (the sim test
+// proves all 289 node pairs reachable and every edge clear).
 const WAYPOINTS = [
   { id: 'atkSpawn', x: 0, z: 20 },
   { id: 'defSpawn', x: 0, z: -20 },
@@ -45,15 +49,15 @@ const WAYPOINTS = [
 // Edges are walkable straight lines by construction: midSouth reaches
 // midCross around the inspection booth (via boothWest/boothEast), never
 // through it; eastMid reaches eastNorth through the warehouse doorway
-// (via siteBEntry), never through the warehouse wall.
+// (via siteBEntry), never through the warehouse wall. There is deliberately
+// no midNorth -> eastNorth edge — eastNorth sits behind the warehouse west
+// wall and is only reachable through the doorway.
 const EDGES = [
   ['atkSpawn', 'midSouth'], ['atkSpawn', 'westSouth'], ['atkSpawn', 'eastSouth'],
   ['midSouth', 'boothWest'], ['midSouth', 'boothEast'],
   ['midCross', 'midNorth'], ['midCross', 'westMid'], ['midCross', 'eastMid'],
   ['midCross', 'boothWest'], ['midCross', 'boothEast'],
   ['midNorth', 'defSpawn'], ['midNorth', 'siteAEntry'], ['midNorth', 'siteBEntry'],
-  // No midNorth -> eastNorth edge: eastNorth sits behind the warehouse west
-  // wall and is only reachable through the doorway (via siteBEntry).
   ['midNorth', 'westNorth'],
   ['westSouth', 'westMid'], ['westMid', 'westNorth'], ['westNorth', 'siteAEntry'],
   ['siteAEntry', 'siteA'],
@@ -61,10 +65,48 @@ const EDGES = [
   ['siteBEntry', 'siteB'],
 ];
 
+// Containers: [x, z, levels, alongZ]. A container is 6.1 x 2.6 x 2.6 and
+// levels stack straight up; alongZ turns it to run north-south. The table
+// is ordered the way the yard was laid out — mid rows first, then the west
+// quay, the east alley, and the south corners — and the paint colour cycles
+// through CONTAINER_COLORS in this order. The z positions are chosen so
+// every waypoint-graph edge crosses the rows through a gap, never through
+// a container: the rows leave the centre band z -2..0.5 open for the
+// midCross crossings, and the diagonals from midNorth cross at z -8.9 and
+// -10.3, clear of both rows. The two three-high stacks crown mid and block
+// the long sightlines.
+const CONTAINERS = [
+  [-8, -14, 2, true], [-8, -5, 3, true], [-8, 3.5, 2, true], [-8, 11, 1, true],
+  [8, -14, 1, true], [8, -5, 2, true], [8, 3.5, 3, true], [8, 11, 2, true],
+  // West quay: cover hugging the lane's east edge and the wall, never
+  // across the lane itself — every waypoint edge must stay walkable.
+  [-20, 8, 1, true], [-20, -2, 2, false], [-28, -9, 1, true], [-16, -19, 1, false],
+  // East alley: same rule, mirrored.
+  [20, 8, 2, true], [20, -2, 1, false], [28, -9, 2, true], [16, -19, 1, false],
+  // South corners near attacker spawn.
+  [-14, 19, 1, false], [14, 19, 2, false],
+];
+
+// Low crates: [x, z, width, height, depth] — crouch cover in the open
+// ground between lanes.
+const CRATES = [
+  [-3.5, -6, 1.6, 0.9, 1.6], [3.5, -6, 1.6, 0.9, 1.6],
+  [-13, 6, 1.2, 1.1, 1.2], [13, 6, 1.2, 1.1, 1.2],
+  [-18, 4, 2.2, 0.7, 1.2], [18, 4, 2.2, 0.7, 1.2],
+];
+
+// Floodlight pole positions [x, z]. The two at z 3 sit off the z = 0
+// midCross crossings; the one at (-4, -21) sits off the defSpawn waypoint.
+const FLOODLIGHTS = [
+  [-28, 18], [28, 18], [-28, -20], [28, -20], [-4, -21], [-14, 3], [14, 3],
+];
+
 export function createMap(scene) {
   const group = new THREE.Group();
   scene.add(group);
 
+  // One standard material per palette key. Accent and ink are a little
+  // glossier; crane and concrete carry a touch of metalness.
   const materials = {};
   for (const name of Object.keys(PALETTE)) {
     materials[name] = new THREE.MeshStandardMaterial({
@@ -90,11 +132,16 @@ export function createMap(scene) {
     opacity: 0.85,
   });
 
+  // Three views of the same solid geometry: three.js Box3 colliders for the
+  // renderer, the meshes themselves for hitscan, and plain AABBs for the
+  // JS-side maths (player slide, bot line-of-sight).
   const colliders = [];
   const shootables = [];
-  // Plain AABBs for the JS-side maths (player slide, bot line-of-sight).
   const aabbs = [];
 
+  // Place one box and, unless told otherwise, register it as solid in all
+  // three views. opts.solid false skips collision (scenery outside the
+  // yard); opts.noShadow skips casting shadows.
   function box(w, h, d, x, y, z, material, opts = {}) {
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), materials[material]);
     mesh.position.set(x, y, z);
@@ -133,59 +180,25 @@ export function createMap(scene) {
   box(10, 4, 6, -52, 8.5, -6, 'concrete', { solid: false, noShadow: true }); // freighter bridge
 
   // --- containers -----------------------------------------------------------
-  // A container is 6.1 x 2.6 x 2.6; levels stack straight up. `alongZ` turns it.
   let colorIndex = 0;
-  function container(x, z, levels, alongZ = false) {
+  for (const [cx, cz, levels, alongZ] of CONTAINERS) {
     const color = CONTAINER_COLORS[colorIndex % CONTAINER_COLORS.length];
     colorIndex += 1;
     const w = alongZ ? 2.6 : 6.1;
     const d = alongZ ? 6.1 : 2.6;
     for (let level = 0; level < levels; level += 1) {
-      box(w, 2.6, d, x, 1.3 + level * 2.6, z, color);
+      box(w, 2.6, d, cx, 1.3 + level * 2.6, cz, color);
     }
   }
-
-  // Mid container rows: two north-south rows. Their z positions are chosen
-  // so every waypoint-graph edge crosses the rows through a gap, never
-  // through a container (verified by the sim test): the rows leave the
-  // centre band z -2..0.5 open for the midCross crossings, and the diagonals
-  // from midNorth cross at z -8.9 and -10.3, clear of both rows.
-  // The two three-high stacks crown mid and block the long sightlines.
-  container(-8, -14, 2, true);
-  container(-8, -5, 3, true);
-  container(-8, 3.5, 2, true);
-  container(-8, 11, 1, true);
-  container(8, -14, 1, true);
-  container(8, -5, 2, true);
-  container(8, 3.5, 3, true);
-  container(8, 11, 2, true);
-
-  // West quay: cover hugging the lane's east edge and the wall, never across
-  // the lane itself — every waypoint edge must stay walkable (see sim test).
-  container(-20, 8, 1, true);
-  container(-20, -2, 2);
-  container(-28, -9, 1, true);
-  container(-16, -19, 1);
-  // East alley: same rule, mirrored.
-  container(20, 8, 2, true);
-  container(20, -2, 1);
-  container(28, -9, 2, true);
-  container(16, -19, 1);
-  // South corners near attacker spawn.
-  container(-14, 19, 1);
-  container(14, 19, 2);
 
   // Inspection booth at mid: a 4 x 3 x 3 hut with a flat roof, passable both sides.
   box(4, 3, 3, 0, 1.5, 4, 'concrete');
   box(4.4, 0.25, 3.4, 0, 3.1, 4, 'hairline');
 
   // Low crates: crouch cover in the open ground between lanes.
-  box(1.6, 0.9, 1.6, -3.5, 0.45, -6, 'hairline');
-  box(1.6, 0.9, 1.6, 3.5, 0.45, -6, 'hairline');
-  box(1.2, 1.1, 1.2, -13, 0.55, 6, 'hairline');
-  box(1.2, 1.1, 1.2, 13, 0.55, 6, 'hairline');
-  box(2.2, 0.7, 1.2, -18, 0.35, 4, 'hairline');
-  box(2.2, 0.7, 1.2, 18, 0.35, 4, 'hairline');
+  for (const [cx, cz, w, h, d] of CRATES) {
+    box(w, h, d, cx, h / 2, cz, 'hairline');
+  }
 
   // --- site A: gantry crane -------------------------------------------------
   const craneX = -22;
@@ -206,7 +219,7 @@ export function createMap(scene) {
   cable.position.set(craneX, 7.6, craneZ);
   group.add(cable);
   box(1.1, 1.1, 1.1, craneX, 5.8, craneZ, 'crane');
-  // Crane control cabin, south-west of the site.
+  // Crane control cabin, south-west of the site, with a dark window slit.
   box(3.2, 2.6, 2.6, -25.5, 1.3, -18.5, 'concrete');
   box(3.3, 0.7, 0.1, -25.5, 1.9, -17.15, 'muted', { solid: false, noShadow: true });
 
@@ -234,19 +247,12 @@ export function createMap(scene) {
   }
 
   // --- floodlight poles + lamps --------------------------------------------
-  function floodlight(x, z) {
-    box(0.25, 7.5, 0.25, x, 3.75, z, 'hairline');
+  for (const [fx, fz] of FLOODLIGHTS) {
+    box(0.25, 7.5, 0.25, fx, 3.75, fz, 'hairline');
     const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.35, 0.5), lampMat);
-    lamp.position.set(x, 7.6, z);
+    lamp.position.set(fx, 7.6, fz);
     group.add(lamp);
   }
-  floodlight(-28, 18);
-  floodlight(28, 18);
-  floodlight(-28, -20);
-  floodlight(28, -20);
-  floodlight(-4, -21); // off the defSpawn waypoint, which sits at (0, -20)
-  floodlight(-14, 3); // off the z = 0 midCross crossings
-  floodlight(14, 3);
 
   // --- lights ---------------------------------------------------------------
   // Cold moon key light, warm sodium fill, dim sky/ground gradient.
@@ -289,6 +295,7 @@ export function createMap(scene) {
   poolMid.position.set(0, 6.5, 4);
   scene.add(poolMid);
 
+  // Waypoint lookup by id, plus an adjacency list built from EDGES.
   const nodes = new Map(WAYPOINTS.map((w) => [w.id, w]));
   const adjacency = new Map(WAYPOINTS.map((w) => [w.id, []]));
   for (const [a, b] of EDGES) {
@@ -321,6 +328,12 @@ export function createMap(scene) {
 // Segment vs AABB test in the XZ plane with a vertical band: does the segment
 // from a to b (both {x, y, z}) pass through any solid box? Used for bot
 // line-of-sight so perception never needs a three.js raycast in the hot loop.
+//
+// Slab method, one axis at a time: intersect the segment's parameter range
+// [t0, t1] with each axis slab. A zero delta means the segment runs parallel
+// to that axis — then it is blocked on that axis only if it starts outside
+// the slab. If the range survives all three axes and overlaps [0, 1], the
+// segment passes through the box.
 export function segmentBlocked(a, b, aabbs) {
   const dx = b.x - a.x;
   const dy = b.y - a.y;
@@ -328,14 +341,13 @@ export function segmentBlocked(a, b, aabbs) {
   for (const box of aabbs) {
     let t0 = 0;
     let t1 = 1;
-    // Slab method, one axis at a time; a zero delta means parallel.
-    const axes = [
+    let blocked = true;
+    const slabs = [
       [a.x, dx, box.minX, box.maxX],
       [a.y, dy, box.minY, box.maxY],
       [a.z, dz, box.minZ, box.maxZ],
     ];
-    let blocked = true;
-    for (const [origin, delta, min, max] of axes) {
+    for (const [origin, delta, min, max] of slabs) {
       if (Math.abs(delta) < 1e-9) {
         if (origin < min || origin > max) { blocked = false; break; }
       } else {
@@ -354,7 +366,8 @@ export function segmentBlocked(a, b, aabbs) {
 
 // Breadth-first route over the waypoint graph, from the node nearest `from`
 // to the node nearest `to`. Returns a list of {x, z} waypoints (excluding the
-// start node itself), or null when no route exists.
+// start node itself), or null when no route exists. The route always ends on
+// the exact destination, not just the nearest waypoint.
 export function findRoute(waypoints, from, to) {
   const { nodes, adjacency } = waypoints;
   let startId = null;
@@ -387,7 +400,6 @@ export function findRoute(waypoints, from, to) {
     path.unshift(nodes.get(nodeId));
     nodeId = prev.get(nodeId);
   }
-  // End on the exact destination, not just the nearest waypoint.
   path.push({ x: to.x, z: to.z });
   return path;
 }
