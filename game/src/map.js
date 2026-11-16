@@ -252,10 +252,14 @@ export function createMap(scene) {
   // Cold moon key light, warm sodium fill, dim sky/ground gradient.
   // Brightened after the first browser capture read almost black: the night
   // stays night, but container faces and lane depth must stay readable.
-  const sky = new THREE.HemisphereLight(new THREE.Color('#33415c'), new THREE.Color('#0a0e16'), 0.9);
+  // Second pass (post-opening re-author): the play capture still lost the
+  // booth face on the right to shadow, so the sky gradient and the moon
+  // key both come up a notch and the mid pool gets stronger — the yard
+  // reads at a glance now without the night turning to day.
+  const sky = new THREE.HemisphereLight(new THREE.Color('#33415c'), new THREE.Color('#0a0e16'), 1.35);
   scene.add(sky);
 
-  const moon = new THREE.DirectionalLight(new THREE.Color('#9db8dd'), 1.4);
+  const moon = new THREE.DirectionalLight(new THREE.Color('#9db8dd'), 1.65);
   moon.position.set(-18, 26, 14);
   moon.target.position.set(4, 0, -6);
   moon.castShadow = true;
@@ -270,7 +274,7 @@ export function createMap(scene) {
   moon.shadow.bias = -0.0006;
   scene.add(moon, moon.target);
 
-  const sodium = new THREE.DirectionalLight(new THREE.Color(PALETTE.accent), 0.85);
+  const sodium = new THREE.DirectionalLight(new THREE.Color(PALETTE.accent), 1.0);
   sodium.position.set(14, 18, 18);
   scene.add(sodium);
 
@@ -281,7 +285,7 @@ export function createMap(scene) {
   const poolB = new THREE.PointLight(new THREE.Color(PALETTE.accent), 60, 22, 1.8);
   poolB.position.set(22, 5, -15);
   scene.add(poolB);
-  const poolMid = new THREE.PointLight(new THREE.Color('#ffd9a0'), 45, 20, 1.8);
+  const poolMid = new THREE.PointLight(new THREE.Color('#ffd9a0'), 80, 20, 1.8);
   poolMid.position.set(0, 6.5, 4);
   scene.add(poolMid);
 
