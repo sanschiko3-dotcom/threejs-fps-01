@@ -1,6 +1,7 @@
-// HUD: every DOM write goes through here so main.js never touches the page.
-// Elements live in index.html; this module only updates text, widths and
-// visibility. Killfeed entries fade out on their own after four seconds.
+// HUD: every DOM write goes through here so main.js never touches the
+// page. Elements live in index.html; this module only updates text,
+// widths and visibility. Killfeed entries fade out on their own after
+// four seconds; the round banner hides itself after 2.6 seconds.
 import { WEAPON_DEFS, GRENADE_PRICE, KEVLAR_PRICE, BUY_ORDER } from './weapons.js';
 
 function el(id) {
@@ -16,6 +17,10 @@ const BUY_LABELS = {
   kevlar: 'Kevlar vest',
 };
 
+const KILLFEED_MAX = 5;
+const KILLFEED_FADE_MS = 4000;
+const BANNER_HIDE_MS = 2600;
+
 function buyPrice(id) {
   if (id === 'grenade') return GRENADE_PRICE;
   if (id === 'kevlar') return KEVLAR_PRICE;
@@ -30,53 +35,58 @@ export function createHud() {
   const bannerEl = el('banner');
   const killfeedEl = el('killfeed');
   let hitTimer = 0;
+  let bannerTimer = 0;
 
-  // Build the buy menu rows once.
+  // Build the buy menu rows once; showBuy only toggles their state.
   const buyRows = {};
-  for (const id of BUY_ORDER) {
+  BUY_ORDER.forEach((id, index) => {
     const row = document.createElement('div');
     row.className = 'buy-row';
-    row.innerHTML = `<span class="buy-key">${BUY_ORDER.indexOf(id) + 1}</span>` +
+    row.innerHTML = `<span class="buy-key">${index + 1}</span>` +
       `<span class="buy-name">${BUY_LABELS[id]}</span>` +
       `<span class="buy-price">$${buyPrice(id)}</span>`;
     buyMenuEl.appendChild(row);
     buyRows[id] = row;
+  });
+
+  function setText(id, value) {
+    el(id).textContent = value;
   }
 
   return {
     setHealth(health, armor) {
-      el('health-value').textContent = Math.ceil(health);
-      el('armor-value').textContent = Math.ceil(armor);
+      setText('health-value', Math.ceil(health));
+      setText('armor-value', Math.ceil(armor));
       el('health-bar').style.width = `${Math.max(0, health)}%`;
       el('health').classList.toggle('low', health <= 30);
     },
 
     setAmmo(mag, reserve, weaponName) {
-      el('ammo-mag').textContent = mag;
-      el('ammo-reserve').textContent = `/ ${reserve}`;
-      el('weapon-name').textContent = weaponName;
+      setText('ammo-mag', mag);
+      setText('ammo-reserve', `/ ${reserve}`);
+      setText('weapon-name', weaponName);
       ammoEl.classList.toggle('empty', mag === 0);
     },
 
     setMoney(money) {
-      el('money-value').textContent = `$${money}`;
+      setText('money-value', `$${money}`);
     },
 
     setTimer(seconds, phase) {
       const shown = Math.max(0, Math.ceil(seconds));
-      el('timer').textContent = `${Math.floor(shown / 60)}:${String(shown % 60).padStart(2, '0')}`;
+      setText('timer', `${Math.floor(shown / 60)}:${String(shown % 60).padStart(2, '0')}`);
       el('timer').classList.toggle('urgent', phase === 'live' && shown <= 10);
     },
 
     setScore(attack, defend, round) {
-      el('score-attack').textContent = attack;
-      el('score-defend').textContent = defend;
-      el('round-label').textContent = `ROUND ${round}`;
+      setText('score-attack', attack);
+      setText('score-defend', defend);
+      setText('round-label', `ROUND ${round}`);
     },
 
     setAlive(attackAlive, defendAlive) {
-      el('alive-attack').textContent = `●`.repeat(attackAlive) + `○`.repeat(5 - attackAlive);
-      el('alive-defend').textContent = `●`.repeat(defendAlive) + `○`.repeat(5 - defendAlive);
+      setText('alive-attack', `●`.repeat(attackAlive) + `○`.repeat(5 - attackAlive));
+      setText('alive-defend', `●`.repeat(defendAlive) + `○`.repeat(5 - defendAlive));
     },
 
     setBomb(text) {
@@ -92,8 +102,8 @@ export function createHud() {
         `<span class="feed-head">${headshot ? '◎' : '▸'}</span> ` +
         `<span>${victim}</span>`;
       killfeedEl.prepend(entry);
-      while (killfeedEl.children.length > 5) killfeedEl.lastChild.remove();
-      window.setTimeout(() => entry.remove(), 4000);
+      while (killfeedEl.children.length > KILLFEED_MAX) killfeedEl.lastChild.remove();
+      window.setTimeout(() => entry.remove(), KILLFEED_FADE_MS);
     },
 
     hitMarker(kill, holdMs) {
@@ -109,7 +119,7 @@ export function createHud() {
         row.classList.toggle('owned', owned.includes(id));
         row.classList.toggle('poor', money < buyPrice(id) && !owned.includes(id));
       }
-      el('buy-money').textContent = `$${money}`;
+      setText('buy-money', `$${money}`);
       buyMenuEl.hidden = false;
     },
 
@@ -121,8 +131,8 @@ export function createHud() {
       bannerEl.querySelector('.banner-main').textContent = text;
       bannerEl.querySelector('.banner-sub').textContent = sub || '';
       bannerEl.hidden = false;
-      window.clearTimeout(bannerEl._timer);
-      bannerEl._timer = window.setTimeout(() => { bannerEl.hidden = true; }, 2600);
+      window.clearTimeout(bannerTimer);
+      bannerTimer = window.setTimeout(() => { bannerEl.hidden = true; }, BANNER_HIDE_MS);
     },
 
     hideBanner() {

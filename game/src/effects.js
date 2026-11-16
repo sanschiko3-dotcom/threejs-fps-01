@@ -1,5 +1,7 @@
-// Pooled visual effects: tracers, hit sparks and bomb explosions. Everything
-// is pre-allocated — a firefight must never allocate in the hot loop.
+// Pooled visual effects: tracers, hit sparks and bomb explosions.
+// Everything is pre-allocated — a firefight must never allocate in the
+// hot loop. Clocks here are seconds from performance.now(), matching the
+// `now` the main loop passes into step().
 import * as THREE from 'three';
 
 const TRACER_POOL = 24;
@@ -7,9 +9,11 @@ const TRACER_LIFE = 0.09;
 const SPARK_POOL = 8;
 const SPARK_POINTS = 14;
 const SPARK_LIFE = 0.35;
+const EXPLOSION_SLOTS = 2;
+const EXPLOSION_LIFE = 0.6;
 
 export function createEffects(scene) {
-  // --- tracers --------------------------------------------------------------
+  // --- tracers: one fading line per shot ---------------------------------
   const tracers = [];
   for (let i = 0; i < TRACER_POOL; i += 1) {
     const geometry = new THREE.BufferGeometry();
@@ -25,7 +29,7 @@ export function createEffects(scene) {
   }
   let tracerNext = 0;
 
-  // --- sparks ---------------------------------------------------------------
+  // --- sparks: one burst of flying points per impact ----------------------
   const sparks = [];
   for (let i = 0; i < SPARK_POOL; i += 1) {
     const geometry = new THREE.BufferGeometry();
@@ -41,9 +45,9 @@ export function createEffects(scene) {
   }
   let sparkNext = 0;
 
-  // --- explosions -----------------------------------------------------------
+  // --- explosions: expanding sphere + point light -------------------------
   const explosions = [];
-  for (let i = 0; i < 2; i += 1) {
+  for (let i = 0; i < EXPLOSION_SLOTS; i += 1) {
     const mesh = new THREE.Mesh(
       new THREE.SphereGeometry(1, 18, 12),
       new THREE.MeshBasicMaterial({
@@ -93,13 +97,13 @@ export function createEffects(scene) {
 
     explosion(point, now) {
       const slot = explosions[explosionNext];
-      explosionNext = (explosionNext + 1) % 2;
+      explosionNext = (explosionNext + 1) % EXPLOSION_SLOTS;
       slot.mesh.position.copy(point);
       slot.mesh.visible = true;
       slot.light.position.copy(point);
       slot.light.position.y += 1;
       slot.start = now;
-      slot.until = now + 0.6;
+      slot.until = now + EXPLOSION_LIFE;
     },
 
     step(now, dt) {
@@ -131,7 +135,7 @@ export function createEffects(scene) {
       }
       for (const slot of explosions) {
         if (slot.until <= 0) continue;
-        const t = (now - slot.start) / 0.6;
+        const t = (now - slot.start) / EXPLOSION_LIFE;
         if (t >= 1) {
           slot.mesh.visible = false;
           slot.light.intensity = 0;

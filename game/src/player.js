@@ -1,8 +1,8 @@
 // Bodies: one physics model shared by the human player and every bot.
-// A capsule approximated as a circle in XZ (radius 0.35) sliding against the
-// map's AABBs, with acceleration-based movement, crouch, jump and gravity.
-// Movement is deliberately weighty: stopping to aim pays, sprinting through
-// the open does not. No per-frame allocations in the step.
+// A capsule approximated as a circle in XZ (radius 0.35) sliding against
+// the map's AABBs, with acceleration-based movement, crouch, jump and
+// gravity. Movement is deliberately weighty: stopping to aim pays,
+// sprinting through the open does not. No per-frame allocations in step.
 import * as THREE from 'three';
 
 const RADIUS = 0.35;
@@ -16,6 +16,8 @@ const AIR_ACCEL = 9;
 const FRICTION = 26;
 const GRAVITY = 14;
 const JUMP_SPEED = 5.4;
+const PITCH_LIMIT = 1.45;
+const LOOK_SENSITIVITY = 0.0022;
 
 function clamp(value, min, max) {
   return value < min ? min : value > max ? max : value;
@@ -37,9 +39,10 @@ export function createBody(aabbs, bounds, x, z, yaw) {
     recoilYaw: 0,
   };
 
+  // Push the body out of every overlapping AABB and clamp it inside the
+  // yard. Two passes let a corner push settle against its neighbour.
   function resolveCollisions() {
     const p = state.position;
-    // Keep inside the yard.
     p.x = clamp(p.x, bounds.minX + RADIUS, bounds.maxX - RADIUS);
     p.z = clamp(p.z, bounds.minZ + RADIUS, bounds.maxZ - RADIUS);
     for (let pass = 0; pass < 2; pass += 1) {
@@ -47,8 +50,8 @@ export function createBody(aabbs, bounds, x, z, yaw) {
         if (p.y + HEIGHT <= b.minY || p.y >= b.maxY) continue;
         const cx = clamp(p.x, b.minX, b.maxX);
         const cz = clamp(p.z, b.minZ, b.maxZ);
-        let dx = p.x - cx;
-        let dz = p.z - cz;
+        const dx = p.x - cx;
+        const dz = p.z - cz;
         const d2 = dx * dx + dz * dz;
         if (d2 >= RADIUS * RADIUS) continue;
         if (d2 > 1e-9) {
@@ -57,7 +60,7 @@ export function createBody(aabbs, bounds, x, z, yaw) {
           p.x += dx * push;
           p.z += dz * push;
         } else {
-          // Centre inside the box: push out along the smallest penetration.
+          // Centre inside the box: leave along the smallest penetration.
           const pushLeft = p.x - b.minX + RADIUS;
           const pushRight = b.maxX - p.x + RADIUS;
           const pushBack = p.z - b.minZ + RADIUS;
@@ -90,9 +93,9 @@ export function createBody(aabbs, bounds, x, z, yaw) {
       state.recoilYaw = 0;
     },
 
-    look(dx, dy, sensitivity = 0.0022) {
+    look(dx, dy, sensitivity = LOOK_SENSITIVITY) {
       state.yaw -= dx * sensitivity;
-      state.pitch = clamp(state.pitch - dy * sensitivity, -1.45, 1.45);
+      state.pitch = clamp(state.pitch - dy * sensitivity, -PITCH_LIMIT, PITCH_LIMIT);
     },
 
     recoil(pitchKick, yawKick) {
@@ -109,13 +112,15 @@ export function createBody(aabbs, bounds, x, z, yaw) {
       state.crouching = crouch;
 
       const wishLen = Math.hypot(wishX, wishZ);
-      const targetSpeed = wishLen > 0.01 ? speed : 0;
-      const nx = wishLen > 0.01 ? wishX / wishLen : 0;
-      const nz = wishLen > 0.01 ? wishZ / wishLen : 0;
+      const moving = wishLen > 0.01;
+      const targetSpeed = moving ? speed : 0;
+      const nx = moving ? wishX / wishLen : 0;
+      const nz = moving ? wishZ / wishLen : 0;
       const accel = state.onGround ? GROUND_ACCEL : AIR_ACCEL;
-      v.x += (nx * targetSpeed - v.x) * Math.min(1, accel * dt);
-      v.z += (nz * targetSpeed - v.z) * Math.min(1, accel * dt);
-      if (wishLen <= 0.01 && state.onGround) {
+      const blend = Math.min(1, accel * dt);
+      v.x += (nx * targetSpeed - v.x) * blend;
+      v.z += (nz * targetSpeed - v.z) * blend;
+      if (!moving && state.onGround) {
         const f = Math.max(0, 1 - FRICTION * dt);
         v.x *= f;
         v.z *= f;
@@ -137,8 +142,9 @@ export function createBody(aabbs, bounds, x, z, yaw) {
       resolveCollisions();
 
       // Recoil decays back toward zero; eye height eases to the stance.
-      state.recoilPitch *= Math.max(0, 1 - 9 * dt);
-      state.recoilYaw *= Math.max(0, 1 - 9 * dt);
+      const decay = Math.max(0, 1 - 9 * dt);
+      state.recoilPitch *= decay;
+      state.recoilYaw *= decay;
       const eyeTarget = state.crouching ? EYE_CROUCH : EYE_STAND;
       state.eye += (eyeTarget - state.eye) * Math.min(1, 12 * dt);
     },
@@ -148,7 +154,8 @@ export function createBody(aabbs, bounds, x, z, yaw) {
       return Math.hypot(state.velocity.x, state.velocity.z);
     },
 
-    // Armour soaks half the damage until it is gone.
+    // Armour soaks half the damage until it is gone. Returns the damage
+    // that actually reached health.
     applyDamage(amount) {
       if (!state.alive) return 0;
       let remaining = amount;

@@ -1,8 +1,9 @@
 // Rounds: the match state machine, the economy and the device.
-// First to 8 rounds takes the match (max 15; a 7-7 after 15 is a draw).
+// First to 8 rounds takes the match (max 15; 7-7 after 15 is a draw).
 // Buy phase 12 s, live round 100 s, 4 s between rounds. The device fuses
 // 40 s after planting. Economy is Counter-Strike shaped: $800 to start,
-// $300 a kill, $3250 a round win, $1900 a loss plus $500 per consecutive loss.
+// $300 a kill, $3250 a round win, $1900 a loss plus $500 per consecutive
+// loss (capped at two streak steps).
 import { MAP } from './map.js';
 
 const WIN_ROUNDS = 8;
@@ -13,6 +14,7 @@ const KILL_REWARD = 300;
 const WIN_REWARD = 3250;
 const LOSS_REWARD = 1900;
 const LOSS_STREAK_BONUS = 500;
+const MAX_STREAK_BONUS_STEPS = 2;
 
 export function createRounds(hooks) {
   const state = {
@@ -32,6 +34,8 @@ export function createRounds(hooks) {
     lastReason: '',
   };
 
+  // Pay out a finished round and open the intermission. Only live rounds
+  // can end — a stale call from a defuse or a forced end is a no-op.
   function endRound(winner, reason) {
     if (state.phase !== 'live') return;
     state.score[winner] += 1;
@@ -41,7 +45,7 @@ export function createRounds(hooks) {
       state.money += WIN_REWARD;
       state.lossStreak = 0;
     } else {
-      state.money += LOSS_REWARD + LOSS_STREAK_BONUS * Math.min(2, state.lossStreak);
+      state.money += LOSS_REWARD + LOSS_STREAK_BONUS * Math.min(MAX_STREAK_BONUS_STEPS, state.lossStreak);
       state.lossStreak += 1;
     }
     state.phase = 'over';
@@ -64,6 +68,10 @@ export function createRounds(hooks) {
     hooks.onMatchEnd(winner, { ...state.score });
   }
 
+  function freshBomb() {
+    return { state: 'carried', site: null, pos: null, plantedAt: 0 };
+  }
+
   return {
     state,
 
@@ -78,6 +86,7 @@ export function createRounds(hooks) {
     step(dt, now, alive) {
       if (state.phase === 'matchEnd') return;
       state.timer -= dt;
+
       if (state.phase === 'buy') {
         if (state.timer <= 0) {
           state.phase = 'live';
@@ -86,9 +95,13 @@ export function createRounds(hooks) {
         }
         return;
       }
+
       if (state.phase === 'over') {
         if (state.timer <= 0) {
-          if (state.score.attack >= WIN_ROUNDS || state.score.defend >= WIN_ROUNDS || state.round >= MAX_ROUNDS) {
+          const decided = state.score.attack >= WIN_ROUNDS
+            || state.score.defend >= WIN_ROUNDS
+            || state.round >= MAX_ROUNDS;
+          if (decided) {
             finishMatch();
           } else {
             state.round += 1;
@@ -97,7 +110,9 @@ export function createRounds(hooks) {
         }
         return;
       }
-      // Live round.
+
+      // Live round. While the device is planted the fuse is the only
+      // clock that matters — eliminations and the round timer wait.
       if (state.bomb.state === 'planted') {
         if (now - state.bomb.plantedAt >= FUSE_TIME) {
           hooks.onBombExploded(state.bomb.site);
@@ -132,7 +147,7 @@ export function createRounds(hooks) {
 
     pickupBomb() {
       if (state.bomb.state !== 'dropped') return false;
-      state.bomb = { state: 'carried', site: null, pos: null, plantedAt: 0 };
+      state.bomb = freshBomb();
       return true;
     },
 

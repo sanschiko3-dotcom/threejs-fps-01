@@ -1,11 +1,13 @@
-// Procedural sound: every effect is synthesized with WebAudio, so the game
-// ships no audio files. All calls are safe before the first user gesture —
-// the context is created lazily and resumes on the play click.
+// Procedural sound: every effect is synthesized with WebAudio, so the
+// game ships no audio files. All calls are safe before the first user
+// gesture — the context is created lazily and resumes on the play click.
 export function createAudio() {
   let ctx = null;
   let master = null;
   let noiseBuffer = null;
 
+  // Build (or resume) the shared context and the one white-noise buffer
+  // every filtered burst reuses. Returns null when audio is unavailable.
   function ensure() {
     if (ctx) {
       if (ctx.state === 'suspended') ctx.resume().catch(() => {});
@@ -27,6 +29,7 @@ export function createAudio() {
     return ctx;
   }
 
+  // A burst of filtered noise with an exponential decay envelope.
   function noise({ duration, filterType = 'bandpass', frequency = 1800, q = 0.8, gain = 0.5, when = 0 }) {
     if (!ensure()) return;
     const t = ctx.currentTime + when;
@@ -44,6 +47,7 @@ export function createAudio() {
     source.stop(t + duration + 0.05);
   }
 
+  // A single oscillator blip, optionally gliding down in pitch.
   function tone({ frequency, endFrequency = null, duration, type = 'sine', gain = 0.3, when = 0 }) {
     if (!ensure()) return;
     const t = ctx.currentTime + when;
@@ -59,6 +63,7 @@ export function createAudio() {
     osc.stop(t + duration + 0.05);
   }
 
+  // Per-weapon crack: a filtered noise burst shaped by the gun.
   const SHOT_TONE = {
     dagger: { frequency: 2600, gain: 0.5, duration: 0.09 },
     stinger: { frequency: 2100, gain: 0.42, duration: 0.08 },
